@@ -1,12 +1,14 @@
 from time import sleep
-from gym import utils
 from gym.envs.mujoco import mujoco_env
-from gym import utils
+from gym import utils as gym_utils
 import numpy as np
 from numpy.lib.function_base import select
 from scipy.spatial.transform import Rotation as R
 import os
 from gym  import spaces
+
+import utils
+from utils import denormalize, normalize
 
 class QuadState:
     ROT_SEQ='zyx'
@@ -15,7 +17,7 @@ class QuadState:
         self.pos_range = range(0,3)
         self.att_range = range(self.pos_range.stop, self.pos_range.stop+3)
         self.pos_dot_range = range(self.att_range.stop, self.att_range.stop+len(self.pos_range))
-        self.att_dot_range = range(self.pos_range.stop, self.pos_range.stop+len(self.att_range))
+        self.att_dot_range = range(self.pos_dot_range.stop, self.pos_dot_range.stop+len(self.att_range))
         
     def set_state_from_components(self, pos, att, pos_dot, att_dot):
         self.set_pos(pos)
@@ -85,7 +87,7 @@ class QuadState:
 
 
 # refer: https://github.com/openai/gym/blob/master/gym/envs/mujoco/hopper.py
-class QuadEnv(mujoco_env.MujocoEnv, utils.EzPickle):
+class QuadEnv(mujoco_env.MujocoEnv, gym_utils.EzPickle):
     def __init__(self):        
         self.target_state = QuadState()
         # target_pos = np.array([0,0,0], dtype=np.float32)
@@ -98,31 +100,53 @@ class QuadEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         self.state_tol.set_state_from_vec(np.repeat(0.1, self.target_state.vec().size))
         assert((self.state_tol.vec() >= 0).all())
 
-        self.action_space = self._get_action_space()
-        self.observation_space = self._get_observation_space()
+        # action space and obs space will be initalized in mujocoenv constructor from set methods
+        # self.action_space = utils.normed_space_like(self._get_action_space())
+        # print('action space is:', self.action_space)
+        # self.observation_space = utils.normed_space_like(self._get_observation_space())
 
         CONTROL_FREQ  = 250
         SIM_PHY_FREQ = int(1e3)#np.rint(1/self.model.opt.timestep)
         CONTROL_NUM_STEPS = SIM_PHY_FREQ//CONTROL_FREQ
         self.stepping_freq = CONTROL_FREQ
-        mujoco_robot_desc_file = os.path.abspath(os.path.dirname(__file__) + "/../xmls/quad.xml")        
+        mujoco_robot_desc_file = os.path.abspath(os.path.dirname(__file__) + "/../xmls/quad.xml")
         mujoco_env.MujocoEnv.__init__(self, mujoco_robot_desc_file, CONTROL_NUM_STEPS)
-        utils.EzPickle.__init__(self)
+        gym_utils.EzPickle.__init__(self)
+        print('action space: {}\nobservation space: {}'.format(self.action_space, self.observation_space))
 
-    def step(self, action):
-        self.do_simulation(action, self.frame_skip)
+    def step(self, action_normed):
+        action = denormalize(action_normed, self._get_action_space())
+        action_3d = np.repeat(action[0], 4)
+        self.do_simulation(action_3d, self.frame_skip)
         obs, reward, done = self._get_obs(), self._get_reward(), self._get_done()
+        # if done:
+        #     print('episode finished with final state: {}'.format(obs))
+        # #print('action: {}\tobs:{}'.format(action, obs))
+        obs_normed = normalize(obs, self._get_observation_space())
+
         if type(done)!=bool:
             done=done.item()
-        return obs, reward, done, {}
+
+        return obs_normed, reward, done, {}
+    
+    # override mujoco_env impl.
+    def _set_action_space(self):
+        self.action_space = utils.normed_space_like(self._get_action_space())
+        return self.action_space
+
+    # override mujoco_env impl.
+    def _set_observation_space(self, observation):
+        self.observation_space = utils.normed_space_like(self._get_observation_space())
+        return self.observation_space
 
     def step_freq(self):
         return self.stepping_freq
     
     def _get_obs(self):
-        return np.concatenate(
-            [self.sim.data.qpos.flat, self.sim.data.qvel.flat]
-        )
+        # return np.concatenate(
+        #     [self.sim.data.qpos.flat, self.sim.data.qvel.flat]
+        # )
+        return self._get_state().vec()
     
     def _get_state(self):
         state = QuadState()
@@ -135,18 +159,17 @@ class QuadEnv(mujoco_env.MujocoEnv, utils.EzPickle):
        
 
     def _get_done(self) -> bool:
-        return (
-            not self._is_within_state_space()
-            or self._reached_goal())
+        return not self._is_within_state_space()
 
     def _is_within_state_space(self):
         state = self._get_state()
         # lower and upper
-        pos_space = (np.repeat(-2, self.target_state.get_pos().size),np.repeat(2, self.target_state.get_pos().size))
+        # pos_space = (np.repeat(-2, self.target_state.get_pos().size),np.repeat(2, self.target_state.get_pos().size))
         return (
             np.isfinite(state.vec()).all()
+            and self._get_observation_space().contains(state.vec())
             # todo: make sure reward not maximised by exiting wall quickly
-            and ((pos_space[0] < state.get_pos()).all() and (state.get_pos() < pos_space[1]).all())
+            # and ((pos_space[0] < state.get_pos()).all() and (state.get_pos() < pos_space[1]).all())
             # todo: do we need to check max time steps here?
         )
 
@@ -166,31 +189,38 @@ class QuadEnv(mujoco_env.MujocoEnv, utils.EzPickle):
     def _get_action_space(self):
         # recommended as underlying is gaussian
         # ref: https://stable-baselines3.readthedocs.io/en/master/guide/rl_tips.html#tips-and-tricks-when-creating-a-custom-environment
-        return spaces.Box(low=-1, high=1, shape=(4,), dtype=np.float32)
+        # return spaces.Box(low=0, high=1, shape=(4,), dtype=np.float32)
+        return spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
     
     def _reached_goal(self):
         return self._is_within_goal_tol(self._get_state())
 
     def _is_within_goal_tol(self, state: QuadState):
         return (np.abs(state.vec()-self.target_state.vec())<self.state_tol.vec()).all()
+
+    def _get_hover_state(self):
+        hover_state = QuadState()
+        return hover_state
+    
+    def _get_random_state(self):
+        # randomly deviated state from nominal
+        state_deviation_radius = QuadState()
+        state_deviation_radius.set_pos(np.repeat(1., state_deviation_radius.get_pos().size))
+        state_deviation_radius.set_att(np.repeat(np.deg2rad(45), state_deviation_radius.get_pos().size))
+        state_deviation_radius.set_pos_dot(np.repeat(0.1, state_deviation_radius.get_pos_dot().size))
+        state_deviation_radius.set_att_dot(np.repeat(0.1, state_deviation_radius.get_att_dot().size))
+        deviated_state = QuadState()
+        deviated_state.set_state_from_vec(
+            self.np_random.uniform(low=-1, high=1, size=state_deviation_radius.vec().size)*state_deviation_radius.vec())
+        return deviated_state
        
     def reset_model(self):
         print('episode complete. resetting')
-        state_init_radius = QuadState()
-        state_init_radius.set_pos(np.repeat(1., state_init_radius.get_pos().size))
-        state_init_radius.set_att(np.repeat(np.deg2rad(45), state_init_radius.get_pos().size))
-        state_init_radius.set_pos_dot(np.repeat(0.1, state_init_radius.get_pos_dot().size))
-        state_init_radius.set_att_dot(np.repeat(0.1, state_init_radius.get_att_dot().size))
-
-        init_state = QuadState()
-        while True:
-            init_state.set_state_from_vec(self.np_random.uniform(low=-1, high=1, size=state_init_radius.vec().size)*state_init_radius.vec())
-            # SB3 does not allows initial state to be already within goal
-            if not self._is_within_goal_tol(init_state):
-                break
-        qpos, qvel = init_state.get_mujoco_state()
+        quad_reset_state = self._get_hover_state()
+        qpos, qvel = quad_reset_state.get_mujoco_state()
         self.set_state(qpos, qvel)
-        return self._get_obs()
+        obs_normed = normalize(self._get_obs(), self._get_observation_space())
+        return obs_normed
     
     def viewer_setup(self):
         pass

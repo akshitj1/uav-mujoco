@@ -11,6 +11,7 @@ SIM_DUARTION_SECS=5
 viewer = MjViewer(sim)
 
 sim_state = sim.get_state()
+print('hover state: ',sim_state)
 
 def do_simulation(action, n_frames):
     sim.data.ctrl[:] = action
@@ -33,8 +34,10 @@ print('model mass: ', mass)
 num_actuators=4
 gear_ratio=2.
 nominal_thrust = (mass*9.81)/(num_actuators*gear_ratio)
+print('nominal thrust: {}'.format(nominal_thrust))
+eps_thrust = 0.00
 
 while True:
     sim.set_state(sim_state)
-    action=np.repeat(nominal_thrust, 4)
+    action=np.repeat(nominal_thrust-eps_thrust, 4)
     do_simulation(action, int(SIM_DUARTION_SECS/SIM_TIMESTEP))

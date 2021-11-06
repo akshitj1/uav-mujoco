@@ -1,3 +1,4 @@
 data
 mujoco_env
-__pycache__
+__pycache__/
+.vscode

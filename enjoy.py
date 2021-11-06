@@ -3,10 +3,11 @@ import time
 from stable_baselines3 import PPO
 import os
 
-from utils import sync
 import numpy as np
 from envs.quad import QuadEnv
 from gym import envs as gym_envs
+
+from utils import denormalize
 
 if __name__ == '__main__':
     quad_instance = QuadEnv()
@@ -18,7 +19,7 @@ if __name__ == '__main__':
         id="Quad-v0",
         entry_point="envs.quad:QuadEnv",
         max_episode_steps=steps_per_episode,
-        reward_threshold=75.0,
+        reward_threshold=0.0,
     )
 
 
@@ -36,10 +37,13 @@ if __name__ == '__main__':
     sim_duration = 5 # secs
     while True:
         for i in range(sim_duration*quad_instance.step_freq()):
-            action, _states = tuned_model.predict(obs,
-                                            deterministic=True # OPTIONAL 'deterministic=False'
+            action_normed, _states = tuned_model.predict(obs,
+                                            deterministic=True # OPTIONAL 'deterministic=False'            
                                             )
-            obs, reward, done, info = quad_env.step(action)
+            
+            action=denormalize(action_normed, quad_instance._get_action_space())
+            print('action: ', action)
+            obs, reward, done, info = quad_env.step(action_normed)
             quad_env.render()
             elapsed_real = time.time() - start_time
             elapsed_sim = i*(1./quad_instance.step_freq())
