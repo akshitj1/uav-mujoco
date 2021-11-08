@@ -105,8 +105,8 @@ class QuadEnv(mujoco_env.MujocoEnv, gym_utils.EzPickle):
         # print('action space is:', self.action_space)
         # self.observation_space = utils.normed_space_like(self._get_observation_space())
 
-        CONTROL_FREQ  = 250
-        SIM_PHY_FREQ = int(1e3)#np.rint(1/self.model.opt.timestep)
+        CONTROL_FREQ  = 100
+        SIM_PHY_FREQ = 100 #np.rint(1/self.model.opt.timestep)
         CONTROL_NUM_STEPS = SIM_PHY_FREQ//CONTROL_FREQ
         self.stepping_freq = CONTROL_FREQ
         mujoco_robot_desc_file = os.path.abspath(os.path.dirname(__file__) + "/../xmls/quad.xml")
@@ -116,8 +116,7 @@ class QuadEnv(mujoco_env.MujocoEnv, gym_utils.EzPickle):
 
     def step(self, action_normed):
         action = denormalize(action_normed, self._get_action_space())
-        action_3d = np.repeat(action[0], 4)
-        self.do_simulation(action_3d, self.frame_skip)
+        self.do_simulation(action, self.frame_skip)
         obs, reward, done = self._get_obs(), self._get_reward(), self._get_done()
         # if done:
         #     print('episode finished with final state: {}'.format(obs))
@@ -155,6 +154,8 @@ class QuadEnv(mujoco_env.MujocoEnv, gym_utils.EzPickle):
 
     def _get_reward(self):
         # unweighted
+        # cur_pos=self._get_state().get_pos()
+        # target_pos=self.target_state.get_pos()
         return -np.linalg.norm(self._get_state().vec() - self.target_state.vec())
        
 
@@ -189,8 +190,7 @@ class QuadEnv(mujoco_env.MujocoEnv, gym_utils.EzPickle):
     def _get_action_space(self):
         # recommended as underlying is gaussian
         # ref: https://stable-baselines3.readthedocs.io/en/master/guide/rl_tips.html#tips-and-tricks-when-creating-a-custom-environment
-        # return spaces.Box(low=0, high=1, shape=(4,), dtype=np.float32)
-        return spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32)
+        return spaces.Box(low=0, high=1, shape=(4,), dtype=np.float32)
     
     def _reached_goal(self):
         return self._is_within_goal_tol(self._get_state())

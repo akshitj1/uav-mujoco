@@ -6,10 +6,14 @@ import os
 import numpy as np
 from envs.quad import QuadEnv
 from gym import envs as gym_envs
+import sys
 
 from utils import denormalize
 
 if __name__ == '__main__':
+    if len(sys.argv)<2:
+        raise os.error('ckpt path not provided')
+    checkpoint_file_name=sys.argv[1]
     quad_instance = QuadEnv()
 
     episode_duration=5 #secs
@@ -27,7 +31,7 @@ if __name__ == '__main__':
     quad_env = gym.make('Quad-v0')
     
     data_dir=os.path.join(os.path.dirname(__file__), 'data')
-    tuned_model_path = os.path.join(data_dir, 'success_model.zip')
+    tuned_model_path = os.path.join(data_dir, checkpoint_file_name)
 
     tuned_model = PPO.load(tuned_model_path)
 
@@ -42,7 +46,7 @@ if __name__ == '__main__':
                                             )
             
             action=denormalize(action_normed, quad_instance._get_action_space())
-            print('action: ', action)
+            #print('action: ', action)
             obs, reward, done, info = quad_env.step(action_normed)
             quad_env.render()
             elapsed_real = time.time() - start_time

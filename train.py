@@ -7,23 +7,22 @@ from stable_baselines3.common.policies import ActorCriticPolicy
 import torch
 import os
 from gym import envs as gym_envs
-from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold
+from stable_baselines3.common.callbacks import CheckpointCallback
 
 # converges in 1e5 steps
 
 def train_quad():
     quad_instance = QuadEnv()
     check_env(quad_instance)
-    # train_env = make_vec_env(
-    #     env_id=QuadEnv,
-    #     seed=0
-    # )
+
     episode_duration=5 #secs
     step_freq = quad_instance.step_freq()
     steps_per_episode=int(episode_duration*step_freq)
-    train_episodes = int(1e2) #1e5/steps_per_episode
-    learning_rate=1e-3
-    log_interval_episodes = 10
+    train_episodes = 1e6/steps_per_episode
+    training_num_steps=steps_per_episode*train_episodes
+    learning_rate=3e-4
+    num_parallel_collect_envs=6
+    log_interval_episodes = 10//num_parallel_collect_envs
 
 
     gym_envs.register(
@@ -34,27 +33,47 @@ def train_quad():
     )
 
     # todo: relu v/s tanh
+    # architerture used in: https://www.researchgate.net/publication/334438612_Learning_to_fly_computational_controller_design_for_hybrid_UAVs_with_reinforcement_learning
     ppo_args = dict(
         activation_fn=torch.nn.Tanh,
         net_arch=[64, 64, dict(vf=[64, 64], pi=[64, 64])]
         # net_arch=[512, 512, dict(vf=[256, 128], pi=[256, 128])]
         )
+
+    quad_env = make_vec_env('Quad-v0', n_envs=num_parallel_collect_envs)
+    quad_eval_env = make_vec_env('Quad-v0', n_envs=1)
+    
     actor_critic_model = PPO(
         policy=ActorCriticPolicy,
-        env='Quad-v0',
+        env=quad_env,
         learning_rate=learning_rate,
         policy_kwargs=ppo_args,
         verbose=1)
-    
-    print('-'*20+'begin training'+'-'*20)
-    print('will train for: {} steps'.format(train_episodes*steps_per_episode))
-    actor_critic_model.learn(
-        total_timesteps=train_episodes*steps_per_episode,
-        log_interval=log_interval_episodes)
+
 
     data_dir=os.path.join(os.path.dirname(__file__), 'data')
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
+   
+    print('-'*20+'begin training'+'-'*20)
+    print('will train for: {} steps'.format(training_num_steps))
+
+    # eval_callback = EvalCallback(
+    #     eval_env=quad_eval_env,
+    #     eval_freq=training_num_steps//(10*num_parallel_collect_envs),
+    #     best_model_save_path=data_dir+'/')
+    checkpoint_callback=CheckpointCallback(
+        save_freq=training_num_steps//(10*num_parallel_collect_envs),
+        save_path=data_dir+'/',
+        name_prefix='ckpt',
+        verbose=1
+    )
+
+    actor_critic_model.learn(
+        total_timesteps=training_num_steps,
+        log_interval=log_interval_episodes,
+        callback=checkpoint_callback)
+
     
     print('training complete. saving model.')
 
